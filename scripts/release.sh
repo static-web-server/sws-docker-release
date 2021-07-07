@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 echo "Creating a Github release..."
 
 if [[ "$GITHUB_TOKEN" == "" ]]; then
@@ -10,18 +12,20 @@ fi
 RETRIES=0
 until [ $RETRIES -eq 20 ]
 do
-  echo "Retrying to find a release associated with this tag"
-  CIRRUS_RELEASE=$(curl -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/$CIRRUS_REPO_FULL_NAME/releases/tags/$CIRRUS_TAG | jq -c "[ .[] | select( .tag_name | contains(\"$CIRRUS_TAG\")) ]|.[1]" | jq -r '.id')
+  echo "Finding the release associated with this tag..."
+  CIRRUS_RELEASE=$(curl -sL -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/$CIRRUS_REPO_FULL_NAME/releases | jq -c "[ .[] | select( .tag_name | contains(\"$CIRRUS_TAG\")) ] | .[0]" | jq -r '.id')
   [[ "$CIRRUS_RELEASE" != "null" ]] && break
   RETRIES=$((RETRIES+1))
   sleep 30
 done
 
+
 if [[ "$CIRRUS_RELEASE" == "null" ]]; then
-    echo "Failed to find a release associated with this tag!"
-    echo "No Github release found. Nothing to deploy!"
-    exit 0
+    echo "Failed to find the associated '$CIRRUS_TAG' release!"
+    exit 1
 fi
+
+echo "Github release '$CIRRUS_TAG' found. Preparing asset files to upload..."
 
 file_content_type="application/octet-stream"
 files_to_upload=(
@@ -42,4 +46,4 @@ do
 done
 
 echo
-echo "Releases published successfully."
+echo "Github release assets uploaded successfully."
