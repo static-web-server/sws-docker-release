@@ -2,14 +2,25 @@
 
 echo "Creating a Github release..."
 
-if [[ "$CIRRUS_RELEASE" == "" ]]; then
-  echo "Not a Github release. Nothing to deploy!"
-  exit 0
-fi
-
 if [[ "$GITHUB_TOKEN" == "" ]]; then
   echo "Please provide GitHub access token via GITHUB_TOKEN environment variable!"
   exit 1
+fi
+
+RETRIES=0
+until [ $RETRIES -eq 20 ]
+do
+  echo "Retrying to find a release associated with this tag"
+  CIRRUS_RELEASE=$(curl -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/$CIRRUS_REPO_FULL_NAME/releases/tags/$CIRRUS_TAG | jq -c "[ .[] | select( .tag_name | contains(\"$CIRRUS_TAG\")) ]|.[1]" | jq -r '.id')
+  [[ "$CIRRUS_RELEASE" != "null" ]] && break
+  RETRIES=$((RETRIES+1))
+  sleep 30
+done
+
+if [[ "$CIRRUS_RELEASE" == "null" ]]; then
+    echo "Failed to find a release associated with this tag!"
+    echo "No Github release found. Nothing to deploy!"
+    exit 0
 fi
 
 file_content_type="application/octet-stream"

@@ -38,7 +38,7 @@ task:
     RUSTFLAGS: -Dwarnings
     GITHUB_TOKEN: ENCRYPTED[!dbcafd0bac4e867a9ed0248546cced05058781726bf46054547a20a3542e0bc9e2af0148ecbdbfa3db8593a1ec380461!]
   setup_script:
-    - pkg install -y bash curl
+    - pkg install -y bash curl jq
     - curl https://sh.rustup.rs -sSf --output rustup.sh
     - sh rustup.sh -y --profile minimal --default-toolchain stable
     - . $HOME/.cargo/env
