@@ -33,7 +33,7 @@ task:
 
 task:
   name: freebsd-release
-  only_if: $CIRRUS_RELEASE != ''
+  only_if: $CIRRUS_TAG != ''
   env:
     RUSTFLAGS: -Dwarnings
     GITHUB_TOKEN: ENCRYPTED[!dbcafd0bac4e867a9ed0248546cced05058781726bf46054547a20a3542e0bc9e2af0148ecbdbfa3db8593a1ec380461!]
