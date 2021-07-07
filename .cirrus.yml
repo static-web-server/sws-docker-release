@@ -36,7 +36,7 @@ task:
   only_if: $CIRRUS_TAG != ''
   env:
     RUSTFLAGS: -Dwarnings
-    GITHUB_TOKEN: ENCRYPTED[d1766ef328d83729917d2ffb875d64c35d1c0177edf8f32e66ec464daf5c1b7b145d65fc6c044a73fffe2235d3b38349]
+    GITHUB_TOKEN: ENCRYPTED[!dbcafd0bac4e867a9ed0248546cced05058781726bf46054547a20a3542e0bc9e2af0148ecbdbfa3db8593a1ec380461!]
   setup_script:
     - pkg install -y bash curl
     - curl https://sh.rustup.rs -sSf --output rustup.sh
@@ -55,7 +55,7 @@ task:
       . $HOME/.cargo/env
       staging="static-web-server-$CIRRUS_TAG-x86_64-unknown-freebsd"
       mkdir -p "$staging/"
-      cp "target/release/static-web-server" "$staging/"
+      cp "target/x86_64-unknown-freebsd/release/static-web-server" "$staging/"
       cp {README.md,LICENSE-APACHE,LICENSE-MIT} "$staging/"
       tar czf "$staging.tar.gz" "$staging"
   archive_i686_script:
