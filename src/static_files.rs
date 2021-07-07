@@ -8,6 +8,7 @@ use headers::{
     AcceptRanges, ContentLength, ContentRange, ContentType, HeaderMap, HeaderMapExt, HeaderValue,
     IfModifiedSince, IfRange, IfUnmodifiedSince, LastModified, Range,
 };
+use http::header::CONTENT_TYPE;
 use humansize::{file_size_opts, FileSize};
 use hyper::{Body, Method, Response, StatusCode};
 use percent_encoding::percent_decode_str;
@@ -24,11 +25,11 @@ use tokio::fs::File as TkFile;
 use tokio::io::AsyncSeekExt;
 use tokio_util::io::poll_read_buf;
 
-use crate::error::Result;
+use crate::Result;
 
-/// Entry point to handle web server requests which map to specific files
+/// Entry point to handle incoming requests which map to specific files
 /// on file system and return a file response.
-pub async fn handle_request(
+pub async fn handle(
     method: &Method,
     headers: &HeaderMap<HeaderValue>,
     base: &Path,
@@ -40,32 +41,40 @@ pub async fn handle_request(
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
 
-    let (path, meta, auto_index) = path_from_tail(base.into(), uri_path).await?;
+    let (filepath, meta, auto_index) = path_from_tail(base.to_owned(), uri_path).await?;
 
     // Directory listing
     // 1. Check if "directory listing" feature is enabled,
     // if current path is a valid directory and
     // if it does not contain an `index.html` file
-    if dir_listing && auto_index && !path.exists() {
-        // Redirect if current path does not end with a slash
-        let current_path = uri_path;
-        if !current_path.ends_with('/') {
-            let uri = [current_path, "/"].concat();
-            let loc = HeaderValue::from_str(uri.as_str()).unwrap();
-            let mut resp = Response::new(Body::empty());
+    if dir_listing && auto_index && !filepath.exists() {
+        // Redirect if current path does not end with a slash char
+        if !uri_path.ends_with('/') {
+            let uri = [uri_path, "/"].concat();
+            let loc = match HeaderValue::from_str(uri.as_str()) {
+                Ok(val) => val,
+                Err(err) => {
+                    tracing::error!("invalid header value from current uri: {:?}", err);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            };
 
+            let mut resp = Response::new(Body::empty());
             resp.headers_mut().insert(hyper::header::LOCATION, loc);
             *resp.status_mut() = StatusCode::PERMANENT_REDIRECT;
+            tracing::trace!("uri doesn't end with a slash so redirect permanently");
 
             return Ok(resp);
         }
 
-        return directory_listing(method, (current_path.to_owned(), path)).await;
+        return directory_listing(method, uri_path, &filepath).await;
     }
 
-    file_reply(headers, (path, meta, auto_index)).await
+    file_reply(headers, (filepath, meta, auto_index)).await
 }
 
+/// Convert an incoming uri into a valid and sanitized path then returns a tuple
+// with the path as well as its file metadata and an auto index check if it's a directory.
 fn path_from_tail(
     base: PathBuf,
     tail: &str,
@@ -90,23 +99,31 @@ fn path_from_tail(
     })
 }
 
-fn directory_listing(
-    method: &Method,
-    res: (String, PathBuf),
-) -> impl Future<Output = Result<Response<Body>, StatusCode>> + Send {
-    let (current_path, path) = res;
+/// Provides directory listing support for the current request.
+/// Note that this function is a highly dependent on `path_from_tail()`
+// function which must be called first. See `handle()` more for details.
+fn directory_listing<'a>(
+    method: &'a Method,
+    current_path: &'a str,
+    filepath: &'a Path,
+) -> impl Future<Output = Result<Response<Body>, StatusCode>> + Send + 'a {
     let is_head = method == Method::HEAD;
-    let parent = path.parent().unwrap();
-    let parent = PathBuf::from(parent);
+
+    // Note: it's safe to call `parent()` here since `filepath`
+    // value always refer to a path with file ending and under
+    // a root directory boundary.
+    // See `path_from_tail()` function which sanitizes the requested
+    // path before to be delegated here.
+    let parent = filepath.parent().unwrap_or(filepath);
 
     tokio::fs::read_dir(parent).then(move |res| match res {
         Ok(entries) => Either::Left(async move {
-            match read_directory_entries(entries, &current_path, is_head).await {
+            match read_directory_entries(entries, current_path, is_head).await {
                 Ok(resp) => Ok(resp),
                 Err(err) => {
                     tracing::error!(
                         "error during directory entries reading (path={:?}): {} ",
-                        path.parent().unwrap().display(),
+                        parent.display(),
                         err
                     );
                     Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -116,17 +133,17 @@ fn directory_listing(
         Err(err) => {
             let status = match err.kind() {
                 io::ErrorKind::NotFound => {
-                    tracing::debug!("entry file not found: {:?}", path.display());
+                    tracing::debug!("entry file not found: {:?}", filepath.display());
                     StatusCode::NOT_FOUND
                 }
                 io::ErrorKind::PermissionDenied => {
-                    tracing::warn!("entry file permission denied: {:?}", path.display());
+                    tracing::warn!("entry file permission denied: {:?}", filepath.display());
                     StatusCode::FORBIDDEN
                 }
                 _ => {
                     tracing::error!(
-                        "directory entries error (path={:?}): {} ",
-                        path.display(),
+                        "directory entries error (filepath={:?}): {} ",
+                        filepath.display(),
                         err
                     );
                     StatusCode::INTERNAL_SERVER_ERROR
@@ -147,6 +164,7 @@ async fn read_directory_entries(
     if base_path != "/" {
         entries_str = String::from(r#"<tr><td colspan="3"><a href="../">../</a></td></tr>"#);
     }
+
     let mut dirs_count: usize = 0;
     let mut files_count: usize = 0;
     while let Some(entry) = entries.next_entry().await? {
@@ -185,7 +203,13 @@ async fn read_directory_entries(
         }
 
         let uri = format!("{}{}", base_path, name);
-        let modified = parse_last_modified(meta.modified()?).unwrap();
+        let modified = match parse_last_modified(meta.modified()?) {
+            Ok(tm) => tm.to_local().strftime("%F %T")?.to_string(),
+            Err(err) => {
+                tracing::error!("error determining file last modified: {:?}", err);
+                String::from("-")
+            }
+        };
 
         entries_str = format!(
             "{}<tr><td><a href=\"{}\" title=\"{}\">{}</a></td><td style=\"width: 160px;\">{}</td><td align=\"right\">{}</td></tr>",
@@ -193,7 +217,7 @@ async fn read_directory_entries(
             uri,
             name,
             name,
-            modified.to_local().strftime("%F %T").unwrap(),
+            modified,
             filesize_str
         );
     }
@@ -216,6 +240,10 @@ async fn read_directory_entries(
     );
 
     let mut resp = Response::new(Body::empty());
+    resp.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
     resp.headers_mut()
         .typed_insert(ContentLength(page_str.len() as u64));
 
