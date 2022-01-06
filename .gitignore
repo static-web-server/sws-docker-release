@@ -13,7 +13,6 @@
 **/*.gz
 **/.DS_Store
 **/*.env
-**/*.svg
 **/*.data*
 **/*.zst
 **/*.out*
@@ -21,5 +20,8 @@
 release
 .vscode
 TODO
+docs/site
+static-web-server
 
 !sample.env
+!/docs
