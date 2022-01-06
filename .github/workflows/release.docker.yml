@@ -18,7 +18,7 @@ jobs:
           images: joseluisq/static-web-server
           flavor: |
             latest=false
-            suffix=alpine
+            suffix=-alpine
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
