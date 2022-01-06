@@ -36,7 +36,7 @@ jobs:
         name: Prepare Docker envs
         shell: bash
         run: |
-          echo "SERVER_VERSION=${GITHUB_REF##v}" >> $GITHUB_ENV
+          echo "SERVER_VERSION=${GITHUB_REF##*/v}" >> $GITHUB_ENV
           echo "SERVER_DOCKERFILE=./docker/alpine/Dockerfile" >> $GITHUB_ENV
       -
         name: Build and push (alpine)
@@ -79,7 +79,7 @@ jobs:
         name: Prepare Docker envs
         shell: bash
         run: |
-          echo "SERVER_VERSION=${GITHUB_REF##v}" >> $GITHUB_ENV
+          echo "SERVER_VERSION=${GITHUB_REF##*/v}" >> $GITHUB_ENV
           echo "SERVER_DOCKERFILE=./docker/scratch/Dockerfile" >> $GITHUB_ENV
       -
         name: Build and push (scratch)
